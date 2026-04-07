@@ -31,6 +31,8 @@ interface AppState {
 
   scheduleDate: Date | undefined;
   setScheduleDate: (date: Date | undefined) => void;
+  scheduleTime: string;
+  setScheduleTime: (time: string) => void;
 
   // Dashboard State
   snsConnections: Record<Channel, boolean>;
@@ -73,6 +75,8 @@ export const useAppStore = create<AppState>((set) => ({
 
   scheduleDate: undefined,
   setScheduleDate: (scheduleDate) => set({ scheduleDate }),
+  scheduleTime: '09:00',
+  setScheduleTime: (scheduleTime) => set({ scheduleTime }),
 
   snsConnections: {
     instagram: true,
@@ -119,5 +123,6 @@ export const useAppStore = create<AppState>((set) => ({
       concept: '',
       generatedContent: { instagram: '', blog: '', twitter: '', youtube: '', linkedin: '', tiktok: '', threads: '' },
       scheduleDate: undefined,
+      scheduleTime: '09:00',
     }),
 }));

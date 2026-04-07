@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,9 +11,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
-import { CalendarIcon, CheckCircle2, ChevronRight, Loader2, Sparkles } from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
+import { AlertCircle, CalendarIcon, CheckCircle2, ChevronRight, Loader2, Sparkles } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import type { Channel } from '@/store/useAppStore';
 
 const steps = [
   { id: 1, name: 'Keyword' },
@@ -23,8 +23,12 @@ const steps = [
   { id: 5, name: 'Schedule' },
 ];
 
+const channels: Channel[] = ['instagram', 'blog', 'twitter', 'youtube', 'linkedin', 'tiktok', 'threads'];
+
 export default function CreateContentPage() {
   const router = useRouter();
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [generationWarning, setGenerationWarning] = useState<string | null>(null);
   const {
     step, setStep, nextStep, prevStep,
     keyword, setKeyword,
@@ -32,98 +36,65 @@ export default function CreateContentPage() {
     generatedContent, setGeneratedContent,
     isGenerating, setIsGenerating,
     scheduleDate, setScheduleDate,
+    scheduleTime, setScheduleTime,
     addScheduledPost, resetEditor
   } = useAppStore();
 
   const handleGenerate = async () => {
-    nextStep(); // Go to step 3 (Generate)
+    setGenerationError(null);
+    setGenerationWarning(null);
+    nextStep();
     setIsGenerating(true);
-    
-    // Reset content
-    setGeneratedContent('instagram', '');
-    setGeneratedContent('blog', '');
-    setGeneratedContent('twitter', '');
-    setGeneratedContent('youtube', '');
-    setGeneratedContent('linkedin', '');
-    setGeneratedContent('tiktok', '');
-    setGeneratedContent('threads', '');
+
+    channels.forEach((channel) => {
+      setGeneratedContent(channel, '');
+    });
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
-      const prompt = `You are an expert social media manager. Create promotional content for a product/service based on the following:
-Keyword: ${keyword}
-Concept/Tone: ${concept}
-
-Please generate content for 7 different platforms: Instagram, Naver Blog, Twitter, YouTube, LinkedIn, TikTok, and Threads.
-Format the output EXACTLY like this:
-
-[INSTAGRAM]
-(Write the Instagram caption here, including emojis and hashtags)
-
-[BLOG]
-(Write the Naver Blog post here. First line should be the title. Then the body.)
-
-[TWITTER]
-(Write a short, engaging tweet here, under 280 characters)
-
-[YOUTUBE]
-(Write the YouTube video title on the first line. Then the video description below it.)
-
-[LINKEDIN]
-(Write a professional LinkedIn post here)
-
-[TIKTOK]
-(Write a short, catchy TikTok video caption and hashtags)
-
-[THREADS]
-(Write a conversational, engaging Threads post)`;
-
-      const responseStream = await ai.models.generateContentStream({
-        model: 'gemini-3-flash-preview',
-        contents: prompt,
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ keyword, concept }),
       });
 
-      let fullText = '';
-      for await (const chunk of responseStream) {
-        fullText += chunk.text;
-        
-        // Parse the text as it streams
-        const instaMatch = fullText.match(/\[INSTAGRAM\]\n([\s\S]*?)(?=\n\[BLOG\]|$)/);
-        const blogMatch = fullText.match(/\[BLOG\]\n([\s\S]*?)(?=\n\[TWITTER\]|$)/);
-        const twitterMatch = fullText.match(/\[TWITTER\]\n([\s\S]*?)(?=\n\[YOUTUBE\]|$)/);
-        const youtubeMatch = fullText.match(/\[YOUTUBE\]\n([\s\S]*?)(?=\n\[LINKEDIN\]|$)/);
-        const linkedinMatch = fullText.match(/\[LINKEDIN\]\n([\s\S]*?)(?=\n\[TIKTOK\]|$)/);
-        const tiktokMatch = fullText.match(/\[TIKTOK\]\n([\s\S]*?)(?=\n\[THREADS\]|$)/);
-        const threadsMatch = fullText.match(/\[THREADS\]\n([\s\S]*?)$/);
+      const payload = await response.json();
 
-        if (instaMatch) setGeneratedContent('instagram', instaMatch[1].trim());
-        if (blogMatch) setGeneratedContent('blog', blogMatch[1].trim());
-        if (twitterMatch) setGeneratedContent('twitter', twitterMatch[1].trim());
-        if (youtubeMatch) setGeneratedContent('youtube', youtubeMatch[1].trim());
-        if (linkedinMatch) setGeneratedContent('linkedin', linkedinMatch[1].trim());
-        if (tiktokMatch) setGeneratedContent('tiktok', tiktokMatch[1].trim());
-        if (threadsMatch) setGeneratedContent('threads', threadsMatch[1].trim());
+      if (!response.ok) {
+        throw new Error(payload.error ?? 'Unable to generate content.');
       }
-      
+
+      channels.forEach((channel) => {
+        setGeneratedContent(channel, payload.content?.[channel] ?? '');
+      });
+
+      if (payload.warning) {
+        setGenerationWarning(payload.warning);
+      }
+
       setIsGenerating(false);
-      nextStep(); // Go to step 4 (Review)
+      nextStep();
     } catch (error) {
-      console.error("Error generating content:", error);
+      console.error('Error generating content:', error);
       setIsGenerating(false);
-      // Handle error appropriately in a real app
+      setGenerationError(error instanceof Error ? error.message : 'Unable to generate content.');
     }
   };
 
   const handleSchedule = () => {
     if (!scheduleDate) return;
-    
-    // Add posts for each channel
-    ['instagram', 'blog', 'twitter', 'youtube', 'linkedin', 'tiktok', 'threads'].forEach((channel) => {
+
+    const [hours, minutes] = scheduleTime.split(':').map((value) => Number(value));
+    const scheduledAt = new Date(scheduleDate);
+    scheduledAt.setHours(Number.isFinite(hours) ? hours : 9, Number.isFinite(minutes) ? minutes : 0, 0, 0);
+
+    channels.forEach((channel) => {
       addScheduledPost({
-        id: Math.random().toString(36).substr(2, 9),
-        channel: channel as any,
-        content: generatedContent[channel as keyof typeof generatedContent],
-        date: scheduleDate,
+        id: crypto.randomUUID(),
+        channel,
+        content: generatedContent[channel],
+        date: scheduledAt,
         status: 'scheduled',
       });
     });
@@ -133,7 +104,7 @@ Format the output EXACTLY like this:
   };
 
   return (
-    <div className="p-8 max-w-5xl mx-auto w-full space-y-8">
+    <div className="mx-auto w-full max-w-5xl space-y-8 p-4 sm:p-6 lg:p-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold tracking-tight">Create Content</h1>
         <p className="text-muted-foreground mt-2">Generate and schedule multi-channel promotional content.</p>
@@ -193,7 +164,7 @@ Format the output EXACTLY like this:
               <CardDescription>What tone and style should the content have?</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 {['Professional & Trustworthy', 'Fun & Engaging', 'Urgent & Promotional', 'Storytelling & Emotional'].map((c) => (
                   <div 
                     key={c}
@@ -217,42 +188,74 @@ Format the output EXACTLY like this:
         )}
 
         {step === 3 && (
-          <Card className="max-w-4xl mx-auto">
+          <Card className="mx-auto max-w-4xl">
             <CardHeader className="text-center">
               <CardTitle className="flex items-center justify-center gap-2">
-                <Loader2 className="w-5 h-5 animate-spin text-primary" />
-                Generating Content...
+                {generationError ? (
+                  <AlertCircle className="h-5 w-5 text-destructive" />
+                ) : (
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                )}
+                {generationError ? 'Generation failed' : 'Generating Content...'}
               </CardTitle>
-              <CardDescription>Our AI is crafting the perfect message for each channel.</CardDescription>
+              <CardDescription>
+                {generationError
+                  ? 'The request did not complete. Adjust the concept or retry the request.'
+                  : 'promo.pikkto is preparing channel-specific copy for review.'}
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="space-y-4">
-                  <h3 className="font-medium text-sm text-muted-foreground">Drafting Text</h3>
-                  <div className="space-y-2">
-                    <Skeleton className="h-4 w-full" />
-                    <Skeleton className="h-4 w-[90%]" />
-                    <Skeleton className="h-4 w-[95%]" />
-                    <Skeleton className="h-4 w-[80%]" />
+              {generationError ? (
+                <div className="space-y-6">
+                  <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
+                    {generationError}
                   </div>
-                  <div className="p-4 bg-muted/50 rounded-lg text-sm whitespace-pre-wrap font-mono text-muted-foreground h-[200px] overflow-y-auto">
-                    {generatedContent.instagram || generatedContent.blog || generatedContent.twitter || "Initializing..."}
+                  <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+                    <Button variant="outline" onClick={() => setStep(2)}>
+                      Back to Concept
+                    </Button>
+                    <Button onClick={handleGenerate}>
+                      Try Again
+                    </Button>
                   </div>
                 </div>
-                <div className="space-y-4">
-                  <h3 className="font-medium text-sm text-muted-foreground">Generating Image</h3>
-                  <Skeleton className="w-full aspect-square rounded-xl" />
+              ) : (
+                <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-medium text-muted-foreground">Drafting Text</h3>
+                    <div className="space-y-2">
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-4 w-[90%]" />
+                      <Skeleton className="h-4 w-[95%]" />
+                      <Skeleton className="h-4 w-[80%]" />
+                    </div>
+                    <div className="h-[200px] overflow-y-auto rounded-lg bg-muted/50 p-4 font-mono text-sm text-muted-foreground whitespace-pre-wrap">
+                      {generatedContent.instagram || generatedContent.blog || generatedContent.twitter || 'Initializing...'}
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-medium text-muted-foreground">Next in the workflow</h3>
+                    <div className="rounded-xl border border-dashed bg-muted/30 p-6 text-sm text-muted-foreground">
+                      Image generation is not wired in this build yet. Finish copy review first, then attach creative assets during publishing integration.
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </CardContent>
           </Card>
         )}
 
         {step === 4 && (
           <div className="space-y-6">
-            <div className="flex justify-between items-center">
+            {generationWarning ? (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700">
+                {generationWarning}
+              </div>
+            ) : null}
+
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <h2 className="text-2xl font-bold">Review & Edit</h2>
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row">
                 <Button variant="outline" onClick={() => setStep(2)}>Regenerate</Button>
                 <Button onClick={nextStep}>Continue to Schedule <ChevronRight className="w-4 h-4 ml-2" /></Button>
               </div>
@@ -358,10 +361,10 @@ Format the output EXACTLY like this:
           <Card className="max-w-xl mx-auto">
             <CardHeader>
               <CardTitle>Schedule Upload</CardTitle>
-              <CardDescription>When should we publish this content across your channels?</CardDescription>
+              <CardDescription>Choose the exact local date and time for this scheduled publishing batch.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="flex flex-col space-y-2">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <Popover>
                   <PopoverTrigger
                     className={`w-full justify-start text-left font-normal flex items-center h-10 px-4 py-2 border border-input bg-background hover:bg-accent hover:text-accent-foreground rounded-md text-sm ${!scheduleDate && "text-muted-foreground"}`}
@@ -378,10 +381,24 @@ Format the output EXACTLY like this:
                     />
                   </PopoverContent>
                 </Popover>
+                <div className="space-y-2">
+                  <label htmlFor="publish-time" className="text-sm font-medium">
+                    Publish time
+                  </label>
+                  <Input
+                    id="publish-time"
+                    type="time"
+                    value={scheduleTime}
+                    onChange={(event) => setScheduleTime(event.target.value)}
+                  />
+                </div>
               </div>
               
               <div className="bg-muted/50 p-4 rounded-lg space-y-2">
                 <h4 className="text-sm font-medium">Ready to schedule for:</h4>
+                <p className="text-sm text-muted-foreground">
+                  {scheduleDate ? `${format(scheduleDate, 'PPP')} at ${scheduleTime}` : 'Pick a date and time to preview the schedule.'}
+                </p>
                 <div className="flex flex-wrap gap-2">
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-pink-100 text-pink-800">Instagram</span>
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Naver Blog</span>
